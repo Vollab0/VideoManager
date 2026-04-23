@@ -536,7 +536,6 @@ namespace VideoManager
             var mixedItems = PhotoList.Cast<object>()
                 .Concat(VideoList.Cast<object>())
                 .OrderBy(x => random.Next())
-                .Take(30)
                 .ToList();
 
             foreach (var item in mixedItems)
@@ -547,6 +546,19 @@ namespace VideoManager
 
             DashboardItems.Clear();
             foreach (var item in mixedItems) DashboardItems.Add(item);
+
+            // Upgrade thumbnails to high-res for double-column items
+            var tokenDash = _refreshPhotosCts?.Token ?? CancellationToken.None;
+            foreach (var item in mixedItems)
+            {
+                int span = item is PhotoItem pi ? pi.ColumnSpan : (item is VideoItem vi ? vi.ColumnSpan : 1);
+                if (span >= 2)
+                {
+                    string path = item is PhotoItem pp ? pp.FilePath : (item is VideoItem vv ? vv.FilePath : "");
+                    if (!string.IsNullOrEmpty(path))
+                        _ = UpgradeToHighResThumbnailAsync(item, path, tokenDash);
+                }
+            }
 
             var firstPhoto = PhotoList
                 .OrderByDescending(p => p.FileName)
@@ -629,7 +641,7 @@ namespace VideoManager
             await _thumbnailSemaphore.WaitAsync(token);
             try
             {
-                var bitmap = await Task.Run(() => WindowsThumbnailProvider.GetThumbnail(item.FilePath, 150, 150), token);
+                var bitmap = await Task.Run(() => WindowsThumbnailProvider.GetThumbnail(item.FilePath, 300, 300), token);
                 if (bitmap != null)
                 {
                     await Dispatcher.InvokeAsync(() => item.Thumbnail = bitmap, DispatcherPriority.Background);
@@ -644,13 +656,32 @@ namespace VideoManager
             await _thumbnailSemaphore.WaitAsync(token);
             try
             {
-                var bitmap = await Task.Run(() => WindowsThumbnailProvider.GetThumbnail(item.FilePath, 150, 150), token);
+                var bitmap = await Task.Run(() => WindowsThumbnailProvider.GetThumbnail(item.FilePath, 300, 300), token);
                 if (bitmap != null)
                 {
                     await Dispatcher.InvokeAsync(() => item.Thumbnail = bitmap, DispatcherPriority.Background);
                 }
             }
             catch (Exception ex) { Debug.WriteLine($"Thumbnail photo error: {ex.Message}"); }
+            finally { _thumbnailSemaphore.Release(); }
+        }
+
+        private async Task UpgradeToHighResThumbnailAsync(object item, string filePath, CancellationToken token)
+        {
+            await _thumbnailSemaphore.WaitAsync(token);
+            try
+            {
+                var bitmap = await Task.Run(() => WindowsThumbnailProvider.GetThumbnail(filePath, 600, 600), token);
+                if (bitmap != null)
+                {
+                    await Dispatcher.InvokeAsync(() =>
+                    {
+                        if (item is PhotoItem p) p.Thumbnail = bitmap;
+                        else if (item is VideoItem v) v.Thumbnail = bitmap;
+                    }, DispatcherPriority.Background);
+                }
+            }
+            catch (Exception ex) { Debug.WriteLine($"HighRes thumbnail error: {ex.Message}"); }
             finally { _thumbnailSemaphore.Release(); }
         }
 
@@ -834,10 +865,14 @@ namespace VideoManager
 
 
 
-        private void BtnEjecter_Click(object sender, RoutedEventArgs e)
+        private async void BtnEjecter_Click(object sender, RoutedEventArgs e)
         {
             string driveRoot = Path.GetPathRoot(dossierSource) ?? "";
             if (string.IsNullOrEmpty(driveRoot)) return;
+
+            BtnEjecter.IsEnabled = false;
+            ProgBar.Visibility = Visibility.Visible;
+            ProgBar.IsIndeterminate = true;
 
             try
             {
@@ -848,11 +883,18 @@ namespace VideoManager
                     CreateNoWindow = true,
                     UseShellExecute = false
                 };
-                Process.Start(psi)?.WaitForExit();
+                using var process = Process.Start(psi);
+                if (process != null) await process.WaitForExitAsync();
                 OverlayEjectSuccess.Visibility = Visibility.Visible;
                 ActualiserTout();
             }
             catch (Exception ex) { MessageBox.Show("Erreur éjection : " + ex.Message); }
+            finally
+            {
+                ProgBar.IsIndeterminate = false;
+                ProgBar.Visibility = Visibility.Collapsed;
+                BtnEjecter.IsEnabled = true;
+            }
         }
 
         private void BtnMinimize_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
