@@ -1,0 +1,23 @@
+# Build results
+[Bb]in/
+[Oo]bj/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.rsuser
+*.userosscache
+*.sln.docstates
+
+# Logs
+*.log
+crash.log
+
+# Binaires externes volumineux (> 100 Mo, limite GitHub)
+ffmpeg.exe
+ffprobe.exe
+HandBrakeCLI.exe
+
+# ExifTool libs (dossier volumineux, l'exe seul suffit pour le repo)
+exiftool_files/
