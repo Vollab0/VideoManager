@@ -8,7 +8,8 @@
         Background="{DynamicResource AppBackgroundBrush}" Foreground="#FFFFFF"
         WindowStartupLocation="CenterScreen" WindowState="Maximized"
         WindowStyle="SingleBorderWindow" ResizeMode="CanResize"
-        PreviewKeyDown="Window_PreviewKeyDown">
+        PreviewKeyDown="Window_PreviewKeyDown"
+        StateChanged="Window_StateChanged">
 
     <WindowChrome.WindowChrome>
         <WindowChrome CaptionHeight="32" 
@@ -19,7 +20,7 @@
 
     <Window.Resources>
         <SolidColorBrush x:Key="SidebarBackgroundBrush" Color="Transparent"/>
-        <SolidColorBrush x:Key="AppBackgroundBrush" Color="#000000"/>
+        <SolidColorBrush x:Key="AppBackgroundBrush" Color="#18181A"/>
         <SolidColorBrush x:Key="GlassPanelBrush" Color="#14141A"/>
         <SolidColorBrush x:Key="CardBackgroundBrush" Color="#1C1C24"/>
         <SolidColorBrush x:Key="BorderBrushColor" Color="#2C2C35"/>
@@ -31,6 +32,34 @@
         <SolidColorBrush x:Key="SidebarItemForegroundBrush" Color="#B3B3B3"/>
         <SolidColorBrush x:Key="SidebarItemSelectedBrush" Color="#1C1C24"/>
         <SolidColorBrush x:Key="SidebarItemForegroundSelectedBrush" Color="#FFFFFF"/>
+
+        <!-- Style Sombre Global pour les TextBox -->
+        <Style TargetType="TextBox">
+            <Setter Property="Background" Value="#1C1C24"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderBrush" Value="#2C2C35"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="8,5"/>
+            <Setter Property="SelectionBrush" Value="#0A84FF"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border x:Name="border" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6">
+                            <ScrollViewer x:Name="PART_ContentHost" Focusable="false" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Hidden"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="true">
+                                <Setter TargetName="border" Property="BorderBrush" Value="#4A4A50"/>
+                            </Trigger>
+                            <Trigger Property="IsFocused" Value="true">
+                                <Setter TargetName="border" Property="BorderBrush" Value="#0A84FF"/>
+                                <Setter Property="Background" Value="#252530"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
 
         <Style TargetType="Button" x:Key="SystemButtonStyle">
             <Setter Property="Background" Value="Transparent"/>
@@ -350,6 +379,59 @@
                 </Trigger>
             </Style.Triggers>
         </Style>
+
+        <Style x:Key="VideoSliderThumbStyle" TargetType="Thumb">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Thumb">
+                        <Ellipse x:Name="ThumbEllipse" Width="14" Height="14" Fill="White" StrokeThickness="0"/>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ThumbEllipse" Property="Width" Value="16"/>
+                                <Setter TargetName="ThumbEllipse" Property="Height" Value="16"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="VideoSliderStyle" TargetType="Slider">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="IsMoveToPointEnabled" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Border Background="{TemplateBinding Background}">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto" MinHeight="{TemplateBinding MinHeight}"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <Border x:Name="TrackBackground" Background="#4DFFFFFF" CornerRadius="2" Height="4" Grid.Row="1" VerticalAlignment="Center" Margin="5,0">
+                                    <Canvas Margin="-6,-1">
+                                        <Rectangle x:Name="PART_SelectionRange" Fill="{StaticResource AccentBlueBrush}" Height="4" RadiusX="2" RadiusY="2" />
+                                    </Canvas>
+                                </Border>
+                                <Track x:Name="PART_Track" Grid.Row="1">
+                                    <Track.DecreaseRepeatButton>
+                                        <RepeatButton Command="{x:Static Slider.DecreaseLarge}" Style="{StaticResource ScrollTrackButton}"/>
+                                    </Track.DecreaseRepeatButton>
+                                    <Track.IncreaseRepeatButton>
+                                        <RepeatButton Command="{x:Static Slider.IncreaseLarge}" Style="{StaticResource ScrollTrackButton}"/>
+                                    </Track.IncreaseRepeatButton>
+                                    <Track.Thumb>
+                                        <Thumb Style="{StaticResource VideoSliderThumbStyle}"/>
+                                    </Track.Thumb>
+                                </Track>
+                            </Grid>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
     <Border>
@@ -370,8 +452,8 @@
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
 
-            <Grid Grid.ColumnSpan="2" Height="32" VerticalAlignment="Top" Panel.ZIndex="999">
-                <Border Background="Transparent" MouseLeftButtonDown="WindowTitle_MouseLeftButtonDown"/>
+            <Grid Grid.ColumnSpan="2" Height="32" VerticalAlignment="Top" Panel.ZIndex="999" shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                <Border Background="Transparent" MouseLeftButtonDown="WindowTitle_MouseLeftButtonDown" Cursor="Hand"/>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" shell:WindowChrome.IsHitTestVisibleInChrome="True">
                     <Button Content="&#xE921;" FontFamily="Segoe MDL2 Assets" Style="{StaticResource SystemButtonStyle}" Click="BtnMinimize_Click"/>
                     <Button x:Name="BtnMax" Content="&#xE922;" FontFamily="Segoe MDL2 Assets" Style="{StaticResource SystemButtonStyle}" Click="BtnMaximize_Click"/>
@@ -606,7 +688,7 @@
                                 <GridView>
                                     <GridViewColumn Width="500">
                                         <GridViewColumn.Header>
-                                            <GridViewColumnHeader Content="Fichier &amp; Format" Tag="FileName" Click="GridViewColumnHeader_Click"/>
+                                            <GridViewColumnHeader Content="Fichier" Tag="FileName" Click="GridViewColumnHeader_Click"/>
                                         </GridViewColumn.Header>
                                         <GridViewColumn.CellTemplate>
                                             <DataTemplate>
@@ -635,13 +717,22 @@
                                                     <StackPanel VerticalAlignment="Center">
                                                         <TextBlock Text="{Binding FileName}" Foreground="White" FontWeight="Bold" FontSize="16" Margin="0,0,0,5"/>
                                                         <StackPanel Orientation="Horizontal">
-                                                            <TextBlock Text="Format: " Foreground="{StaticResource TextSecondaryBrush}"/>
-                                                            <TextBlock Text="{Binding Format}" Foreground="White" Margin="0,0,15,0"/>
                                                             <TextBlock Text="Durée: " Foreground="{StaticResource TextSecondaryBrush}"/>
                                                             <TextBlock Text="{Binding Duration}" Foreground="White"/>
                                                         </StackPanel>
                                                     </StackPanel>
                                                 </StackPanel>
+                                            </DataTemplate>
+                                        </GridViewColumn.CellTemplate>
+                                    </GridViewColumn>
+
+                                    <GridViewColumn Width="150">
+                                        <GridViewColumn.Header>
+                                            <GridViewColumnHeader Content="Format" Tag="Format" Click="GridViewColumnHeader_Click"/>
+                                        </GridViewColumn.Header>
+                                        <GridViewColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding Format}" Foreground="White" VerticalAlignment="Center"/>
                                             </DataTemplate>
                                         </GridViewColumn.CellTemplate>
                                     </GridViewColumn>
@@ -771,7 +862,7 @@
                                 <GridView>
                                     <GridViewColumn Width="500">
                                         <GridViewColumn.Header>
-                                            <GridViewColumnHeader Content="Fichier &amp; Format" Tag="FileName" Click="GridViewColumnHeaderPhotos_Click"/>
+                                            <GridViewColumnHeader Content="Fichier" Tag="FileName" Click="GridViewColumnHeaderPhotos_Click"/>
                                         </GridViewColumn.Header>
                                         <GridViewColumn.CellTemplate>
                                             <DataTemplate>
@@ -798,13 +889,20 @@
                                                     </Border>
 
                                                     <StackPanel VerticalAlignment="Center">
-                                                        <TextBlock Text="{Binding FileName}" Foreground="White" FontWeight="Bold" FontSize="16" Margin="0,0,0,5"/>
-                                                        <StackPanel Orientation="Horizontal">
-                                                            <TextBlock Text="Format: " Foreground="{StaticResource TextSecondaryBrush}"/>
-                                                            <TextBlock Text="{Binding Format}" Foreground="White"/>
-                                                        </StackPanel>
+                                                        <TextBlock Text="{Binding FileName}" Foreground="White" FontWeight="Bold" FontSize="16" VerticalAlignment="Center"/>
                                                     </StackPanel>
                                                 </StackPanel>
+                                            </DataTemplate>
+                                        </GridViewColumn.CellTemplate>
+                                    </GridViewColumn>
+
+                                    <GridViewColumn Width="150">
+                                        <GridViewColumn.Header>
+                                            <GridViewColumnHeader Content="Format" Tag="Format" Click="GridViewColumnHeaderPhotos_Click"/>
+                                        </GridViewColumn.Header>
+                                        <GridViewColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding Format}" Foreground="White" VerticalAlignment="Center"/>
                                             </DataTemplate>
                                         </GridViewColumn.CellTemplate>
                                     </GridViewColumn>
@@ -885,9 +983,11 @@
                     <StackPanel>
                         <TextBlock Text="Fichier Existant" FontWeight="Bold" FontSize="20" Foreground="White" Margin="0,0,0,10" HorizontalAlignment="Center"/>
                         <TextBlock x:Name="TxtOverwriteMessage" Text="Le fichier est déjà présent. Écraser ?" TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,30" FontSize="15" HorizontalAlignment="Center"/>
-                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                            <Button Content="Annuler" Style="{StaticResource RoundedButton}" Click="BtnOverwriteNon_Click" Width="120" Margin="0,0,15,0"/>
-                            <Button Content="Écraser" Background="{StaticResource AccentRedBrush}" Style="{StaticResource RoundedButton}" Click="BtnOverwriteOui_Click" Width="120"/>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                            <Button Content="Ignorer" Style="{StaticResource RoundedButton}" Click="BtnOverwriteNon_Click" Width="95" Margin="0,0,10,0"/>
+                            <Button Content="Ignorer Tout" Style="{StaticResource RoundedButton}" Click="BtnOverwriteIgnorerTout_Click" Width="110" Margin="0,0,10,0"/>
+                            <Button Content="Écraser" Background="{StaticResource AccentRedBrush}" Style="{StaticResource RoundedButton}" Click="BtnOverwriteOui_Click" Width="95" Margin="0,0,10,0"/>
+                            <Button Content="Écraser Tout" Background="{StaticResource AccentRedBrush}" Style="{StaticResource RoundedButton}" Click="BtnOverwriteEcraserTout_Click" Width="110"/>
                         </StackPanel>
                     </StackPanel>
                 </Border>
@@ -975,7 +1075,53 @@
                             </Button.Template>
                         </Button>
                     </Popup>
+
+                    <Popup x:Name="PlayerControlsPopup" PlacementTarget="{Binding ElementName=OverlayMedia}" Placement="Bottom" VerticalOffset="-130" AllowsTransparency="True" StaysOpen="True">
+                        <Grid x:Name="PlayerControls" Height="80" Background="#B2000000">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="150"/>
+                            </Grid.ColumnDefinitions>
+                            
+                            <Button x:Name="BtnPlayPause" Grid.Column="0" Content="&#xE769;" FontFamily="Segoe MDL2 Assets" FontSize="20" Foreground="White" Background="Transparent" BorderThickness="0" Width="60" Click="BtnPlayPause_Click" Cursor="Hand">
+                                <Button.Template>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border Background="{TemplateBinding Background}">
+                                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter Property="Foreground" Value="{StaticResource AccentBlueBrush}"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Button.Template>
+                            </Button>
+
+                            <TextBlock x:Name="TxtTime" Grid.Column="1" Text="00:00 / 00:00" Foreground="White" VerticalAlignment="Center" Margin="10,0,20,0" FontSize="14" FontWeight="SemiBold"/>
+
+                            <Slider x:Name="SliderProgress" Grid.Column="2" VerticalAlignment="Center" Margin="0,0,20,0" Style="{StaticResource VideoSliderStyle}" IsSelectionRangeEnabled="True" SelectionStart="0" SelectionEnd="{Binding RelativeSource={RelativeSource Self}, Path=Value}" Minimum="0" ValueChanged="SliderProgress_ValueChanged" PreviewMouseLeftButtonDown="SliderProgress_PreviewMouseLeftButtonDown" PreviewMouseLeftButtonUp="SliderProgress_PreviewMouseLeftButtonUp"/>
+
+                            <TextBlock Grid.Column="3" Text="&#xE995;" FontFamily="Segoe MDL2 Assets" Foreground="White" FontSize="18" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                            <Slider x:Name="SliderVolume" Grid.Column="4" VerticalAlignment="Center" Margin="0,0,30,0" Style="{StaticResource VideoSliderStyle}" IsSelectionRangeEnabled="True" SelectionStart="0" SelectionEnd="{Binding RelativeSource={RelativeSource Self}, Path=Value}" Minimum="0" Maximum="100" Value="100" ValueChanged="SliderVolume_ValueChanged"/>
+                        </Grid>
+                    </Popup>
                 </Grid>
+            </Grid>
+
+            <!-- Overlay Alerte/Notification Générique -->
+            <Grid x:Name="OverlayAlert" Visibility="Collapsed" Grid.ColumnSpan="2" Background="#B2000000" Panel.ZIndex="3000">
+                <Border Background="{StaticResource CardBackgroundBrush}" BorderBrush="#3A3A45" BorderThickness="1.5" CornerRadius="12" Padding="30" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="450">
+                    <StackPanel>
+                        <TextBlock x:Name="TxtAlertIcon" Text="&#xE783;" FontFamily="Segoe MDL2 Assets" FontSize="40" Foreground="{StaticResource AccentRedBrush}" HorizontalAlignment="Center" Margin="0,0,0,15"/>
+                        <TextBlock x:Name="TxtAlertTitle" Text="Notification" FontWeight="Bold" FontSize="20" Foreground="White" Margin="0,0,0,10" HorizontalAlignment="Center"/>
+                        <TextBlock x:Name="TxtAlertMessage" Text="Détails du message..." TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,25" FontSize="15" HorizontalAlignment="Center" TextAlignment="Center"/>
+                        <Button Content="OK" Background="{StaticResource AccentBlueBrush}" Style="{StaticResource RoundedButton}" Click="BtnAlertOk_Click" Width="140" HorizontalAlignment="Center" shell:WindowChrome.IsHitTestVisibleInChrome="True"/>
+                    </StackPanel>
+                </Border>
             </Grid>
         </Grid>
     </Border>

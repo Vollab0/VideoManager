@@ -41,9 +41,10 @@ namespace VideoManager
 
         private string _duration = "--:--";
         private ImageSource? _thumbnail;
+        private string _filePath = "";
 
         public string FileName { get; set; } = "";
-        public string FilePath { get; set; } = "";
+        public string FilePath { get => _filePath; set { _filePath = value; OnPropertyChanged(nameof(FilePath)); } }
 
         public ImageSource? Thumbnail { get => _thumbnail; set { _thumbnail = value; OnPropertyChanged(nameof(Thumbnail)); } }
 
@@ -108,9 +109,10 @@ namespace VideoManager
         private string _location = "Inconnu";
         private bool _isSelected;
         private ImageSource? _thumbnail;
+        private string _filePath = "";
 
         public string FileName { get; set; } = "";
-        public string FilePath { get; set; } = "";
+        public string FilePath { get => _filePath; set { _filePath = value; OnPropertyChanged(nameof(FilePath)); } }
         public string Format { get; set; } = "";
         public string Location { get => _location; set { _location = value; OnPropertyChanged(nameof(Location)); } }
         public bool IsSelected { get => _isSelected; set { _isSelected = value; OnPropertyChanged(nameof(IsSelected)); } }
@@ -190,26 +192,42 @@ namespace VideoManager
 
         public static BitmapSource? GetThumbnail(string fileName, int width, int height)
         {
+            IShellItemImageFactory? factory = null;
+            IntPtr hBitmap = IntPtr.Zero;
             try
             {
                 Guid iidIshellItemImageFactory = new Guid("bcc18b79-ba16-442f-80c4-8a59c30c463b");
-                SHCreateItemFromParsingName(fileName, IntPtr.Zero, iidIshellItemImageFactory, out IShellItemImageFactory factory);
+                SHCreateItemFromParsingName(fileName, IntPtr.Zero, iidIshellItemImageFactory, out factory);
 
-                factory.GetImage(new SIZE(width, height), SIIGBF_RESIZETOFIT, out IntPtr hBitmap);
+                factory.GetImage(new SIZE(width, height), SIIGBF_RESIZETOFIT, out hBitmap);
 
-                BitmapSource bitmap = Imaging.CreateBitmapSourceFromHBitmap(
-                    hBitmap,
-                    IntPtr.Zero,
-                    Int32Rect.Empty,
-                    BitmapSizeOptions.FromEmptyOptions());
+                if (hBitmap != IntPtr.Zero)
+                {
+                    BitmapSource bitmap = Imaging.CreateBitmapSourceFromHBitmap(
+                        hBitmap,
+                        IntPtr.Zero,
+                        Int32Rect.Empty,
+                        BitmapSizeOptions.FromEmptyOptions());
 
-                DeleteObject(hBitmap);
-                bitmap.Freeze();
-                return bitmap;
+                    bitmap.Freeze();
+                    return bitmap;
+                }
+                return null;
             }
             catch
             {
                 return null;
+            }
+            finally
+            {
+                if (hBitmap != IntPtr.Zero)
+                {
+                    DeleteObject(hBitmap);
+                }
+                if (factory != null)
+                {
+                    try { Marshal.ReleaseComObject(factory); } catch { }
+                }
             }
         }
 
@@ -241,6 +259,18 @@ namespace VideoManager
         private SemaphoreSlim _thumbnailSemaphore = new SemaphoreSlim(5);
         private CancellationTokenSource? _refreshVideosCts;
         private CancellationTokenSource? _refreshPhotosCts;
+
+        private readonly object _processLock = new object();
+        private readonly List<Process> _activeProcesses = new List<Process>();
+        private OverwriteMode _currentOverwriteMode = OverwriteMode.Ask;
+        private TaskCompletionSource<bool>? _tcsAlert;
+
+        private enum OverwriteMode
+        {
+            Ask,
+            OverwriteAll,
+            IgnoreAll
+        }
 
         private GridViewColumnHeader? _lastHeaderClicked = null;
         private ListSortDirection _lastDirection = ListSortDirection.Ascending;
@@ -278,21 +308,57 @@ namespace VideoManager
 
         private LibVLC _libVLC;
         private LibVLCSharp.Shared.MediaPlayer _mediaPlayer;
+        private DispatcherTimer _videoTimer;
+        private bool _isDraggingSlider = false;
 
         public MainWindow()
         {
-            AppDomain.CurrentDomain.UnhandledException += (s, e) => File.AppendAllText("crash.log", e.ExceptionObject.ToString() + "\n");
-            Application.Current.DispatcherUnhandledException += (s, e) => { File.AppendAllText("crash.log", e.Exception.ToString() + "\n"); e.Handled = true; };
+            AppDomain.CurrentDomain.UnhandledException += (s, e) => {
+                try
+                {
+                    string appDataFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "VideoManager");
+                    Directory.CreateDirectory(appDataFolder);
+                    File.AppendAllText(Path.Combine(appDataFolder, "crash.log"), $"{DateTime.Now}: {e.ExceptionObject}\n");
+                }
+                catch { }
+            };
+            Application.Current.DispatcherUnhandledException += (s, e) => {
+                try
+                {
+                    string appDataFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "VideoManager");
+                    Directory.CreateDirectory(appDataFolder);
+                    File.AppendAllText(Path.Combine(appDataFolder, "crash.log"), $"{DateTime.Now}: {e.Exception}\n");
+                }
+                catch { }
+                e.Handled = true;
+            };
             Core.Initialize();
             _libVLC = new LibVLC();
             _mediaPlayer = new LibVLCSharp.Shared.MediaPlayer(_libVLC);
             
             InitializeComponent();
             VlcVideoView.MediaPlayer = _mediaPlayer;
+            
+            _videoTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
+            _videoTimer.Tick += VideoTimer_Tick;
+
             _mediaPlayer.Playing += (s, e) => Dispatcher.InvokeAsync(() => 
             {
                 LoadingShimmer.Visibility = Visibility.Collapsed;
                 VlcVideoView.Visibility = Visibility.Visible;
+                PlayerControls.Width = ActualWidth - 80;
+                PlayerControlsPopup.HorizontalOffset = 40;
+                PlayerControlsPopup.IsOpen = true;
+                BtnPlayPause.Content = "\uE769"; // Pause icon
+                _videoTimer.Start();
+            });
+            _mediaPlayer.Paused += (s, e) => Dispatcher.InvokeAsync(() => BtnPlayPause.Content = "\uE768"); // Play icon
+            _mediaPlayer.Stopped += (s, e) => Dispatcher.InvokeAsync(() => {
+                _videoTimer.Stop();
+                PlayerControlsPopup.IsOpen = false;
+            });
+            _mediaPlayer.LengthChanged += (s, e) => Dispatcher.InvokeAsync(() => {
+                SliderProgress.Maximum = e.Length;
             });
             
             LoadSettings();
@@ -377,6 +443,170 @@ namespace VideoManager
             return IntPtr.Zero;
         }
 
+        protected override void OnClosing(CancelEventArgs e)
+        {
+            base.OnClosing(e);
+
+            // Cancel any running operations
+            _refreshVideosCts?.Cancel();
+            _refreshPhotosCts?.Cancel();
+
+            // Kill all running child processes registered
+            lock (_processLock)
+            {
+                foreach (var process in _activeProcesses.ToList())
+                {
+                    try
+                    {
+                        if (!process.HasExited)
+                        {
+                            process.Kill(true);
+                        }
+                    }
+                    catch { }
+                }
+                _activeProcesses.Clear();
+            }
+        }
+
+        protected override void OnClosed(EventArgs e)
+        {
+            base.OnClosed(e);
+
+            // Stop and clean up timer
+            if (_videoTimer != null)
+            {
+                _videoTimer.Stop();
+                _videoTimer.Tick -= VideoTimer_Tick;
+            }
+
+            // Dispose VLC controls and media player
+            try
+            {
+                if (_mediaPlayer != null)
+                {
+                    if (_mediaPlayer.IsPlaying)
+                    {
+                        _mediaPlayer.Stop();
+                    }
+                    _mediaPlayer.Dispose();
+                }
+            }
+            catch { }
+
+            try
+            {
+                _libVLC?.Dispose();
+            }
+            catch { }
+        }
+
+        private void Window_StateChanged(object sender, EventArgs e)
+        {
+            if (BtnMax != null)
+            {
+                BtnMax.Content = WindowState == WindowState.Maximized ? "\uE923" : "\uE922";
+            }
+        }
+
+        public class ProcessResult
+        {
+            public int ExitCode { get; set; }
+            public string StandardOutput { get; set; } = "";
+            public string StandardError { get; set; } = "";
+        }
+
+        private async Task<ProcessResult> RunProcessAsync(string fileName, string arguments, CancellationToken cancellationToken, int timeoutMs = -1)
+        {
+            var pcs = new ProcessStartInfo
+            {
+                FileName = fileName,
+                Arguments = arguments,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            using var process = new Process { StartInfo = pcs };
+            
+            lock (_processLock)
+            {
+                _activeProcesses.Add(process);
+            }
+
+            try
+            {
+                if (!process.Start())
+                {
+                    throw new Exception($"Failed to start process: {fileName}");
+                }
+
+                var readOutputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+                var readErrorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+
+                var processExitTask = process.WaitForExitAsync(cancellationToken);
+
+                Task delayTask = Task.Delay(timeoutMs > 0 ? timeoutMs : Timeout.Infinite, cancellationToken);
+                Task completedTask = await Task.WhenAny(processExitTask, delayTask);
+
+                if (completedTask == delayTask)
+                {
+                    try { process.Kill(true); } catch { }
+                    throw new TimeoutException($"Process {fileName} timed out after {timeoutMs}ms.");
+                }
+
+                await Task.WhenAll(processExitTask, readOutputTask, readErrorTask);
+
+                return new ProcessResult
+                {
+                    ExitCode = process.ExitCode,
+                    StandardOutput = readOutputTask.Result,
+                    StandardError = readErrorTask.Result
+                };
+            }
+            catch (OperationCanceledException)
+            {
+                try { process.Kill(true); } catch { }
+                throw;
+            }
+            finally
+            {
+                lock (_processLock)
+                {
+                    _activeProcesses.Remove(process);
+                }
+            }
+        }
+
+        private Task AfficherAlerteAsync(string title, string message, bool isError)
+        {
+            _tcsAlert = new TaskCompletionSource<bool>();
+            
+            TxtAlertTitle.Text = title;
+            TxtAlertMessage.Text = message;
+            
+            if (isError)
+            {
+                TxtAlertIcon.Text = "\uE783";
+                TxtAlertIcon.Foreground = (Brush)FindResource("AccentRedBrush");
+            }
+            else
+            {
+                TxtAlertIcon.Text = "\uE73E";
+                TxtAlertIcon.Foreground = (Brush)FindResource("AccentGreenBrush");
+            }
+
+            OverlayAlert.Visibility = Visibility.Visible;
+            return _tcsAlert.Task;
+        }
+
+        private void BtnAlertOk_Click(object sender, RoutedEventArgs e)
+        {
+            OverlayAlert.Visibility = Visibility.Collapsed;
+            _tcsAlert?.TrySetResult(true);
+        }
+
         private string DetecterSD()
         {
             foreach (var drive in DriveInfo.GetDrives())
@@ -405,7 +635,11 @@ namespace VideoManager
 
         private async void ActualiserTout()
         {
-            _refreshVideosCts?.Cancel();
+            if (_refreshVideosCts != null)
+            {
+                _refreshVideosCts.Cancel();
+                _refreshVideosCts.Dispose();
+            }
             _refreshVideosCts = new CancellationTokenSource();
             var tokenVideos = _refreshVideosCts.Token;
 
@@ -458,7 +692,11 @@ namespace VideoManager
 
         private async void ActualiserPhotos()
         {
-            _refreshPhotosCts?.Cancel();
+            if (_refreshPhotosCts != null)
+            {
+                _refreshPhotosCts.Cancel();
+                _refreshPhotosCts.Dispose();
+            }
             _refreshPhotosCts = new CancellationTokenSource();
             var tokenPhotos = _refreshPhotosCts.Token;
 
@@ -536,6 +774,7 @@ namespace VideoManager
             var mixedItems = PhotoList.Cast<object>()
                 .Concat(VideoList.Cast<object>())
                 .OrderBy(x => random.Next())
+                .Take(50)
                 .ToList();
 
             foreach (var item in mixedItems)
@@ -571,23 +810,20 @@ namespace VideoManager
                 DashShutterCount = "Calcul...";
                 try
                 {
-                    var psi = new ProcessStartInfo
+                    var result = await Task.Run(async () =>
                     {
-                        FileName = Path.Combine(baseDir, "exiftool.exe"),
-                        Arguments = $"-ShutterCount -ImageCount -s -s -s \"{firstPhoto.FilePath}\"",
-                        RedirectStandardOutput = true,
-                        UseShellExecute = false,
-                        CreateNoWindow = true
-                    };
-                    using var proc = Process.Start(psi);
-                    if (proc != null)
-                    {
-                        string output = await proc.StandardOutput.ReadToEndAsync();
-                        await proc.WaitForExitAsync();
-                        string result = output.Trim().Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim() ?? "";
-                        DashShutterCount = !string.IsNullOrEmpty(result) ? result : "Introuvable";
-                    }
+                        var res = await RunProcessAsync(
+                            Path.Combine(baseDir, "exiftool.exe"),
+                            $"-ShutterCount -ImageCount -s -s -s \"{firstPhoto.FilePath}\"",
+                            tokenDash,
+                            3000
+                        );
+                        return res.StandardOutput.Trim().Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim() ?? "";
+                    }, tokenDash);
+                    
+                    DashShutterCount = !string.IsNullOrEmpty(result) ? result : "Introuvable";
                 }
+                catch (TimeoutException) { DashShutterCount = "Timeout"; }
                 catch { DashShutterCount = "Erreur"; }
             }
             else DashShutterCount = "Non dispo";
@@ -601,21 +837,14 @@ namespace VideoManager
                 string ffprobePath = Path.Combine(baseDir, "ffprobe.exe");
                 if (!File.Exists(ffprobePath)) { item.Format = "ffprobe manquant"; return; }
 
-                var startInfo = new ProcessStartInfo
-                {
-                    FileName = ffprobePath,
-                    Arguments = $"-v error -select_streams v:0 -show_entries stream=pix_fmt,duration -of default=noprint_wrappers=1:nokey=1 \"{item.FilePath}\"",
-                    RedirectStandardOutput = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
+                var res = await RunProcessAsync(
+                    ffprobePath,
+                    $"-v error -select_streams v:0 -show_entries stream=pix_fmt,duration -of default=noprint_wrappers=1:nokey=1 \"{item.FilePath}\"",
+                    token,
+                    10000
+                );
 
-                using var process = Process.Start(startInfo);
-                if (process == null) return;
-                string output = await process.StandardOutput.ReadToEndAsync(token);
-                await process.WaitForExitAsync(token);
-
-                var lines = output.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+                var lines = res.StandardOutput.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
                 if (lines.Length >= 2)
                 {
                     string rawFormat = lines[0].Trim();
@@ -644,7 +873,13 @@ namespace VideoManager
                 var bitmap = await Task.Run(() => WindowsThumbnailProvider.GetThumbnail(item.FilePath, 300, 300), token);
                 if (bitmap != null)
                 {
-                    await Dispatcher.InvokeAsync(() => item.Thumbnail = bitmap, DispatcherPriority.Background);
+                    await Dispatcher.InvokeAsync(() =>
+                    {
+                        if (!token.IsCancellationRequested && (item.ColumnSpan < 2 || item.Thumbnail == null))
+                        {
+                            item.Thumbnail = bitmap;
+                        }
+                    }, DispatcherPriority.Background);
                 }
             }
             catch (Exception ex) { Debug.WriteLine($"Thumbnail error: {ex.Message}"); }
@@ -659,7 +894,13 @@ namespace VideoManager
                 var bitmap = await Task.Run(() => WindowsThumbnailProvider.GetThumbnail(item.FilePath, 300, 300), token);
                 if (bitmap != null)
                 {
-                    await Dispatcher.InvokeAsync(() => item.Thumbnail = bitmap, DispatcherPriority.Background);
+                    await Dispatcher.InvokeAsync(() =>
+                    {
+                        if (!token.IsCancellationRequested && (item.ColumnSpan < 2 || item.Thumbnail == null))
+                        {
+                            item.Thumbnail = bitmap;
+                        }
+                    }, DispatcherPriority.Background);
                 }
             }
             catch (Exception ex) { Debug.WriteLine($"Thumbnail photo error: {ex.Message}"); }
@@ -676,8 +917,11 @@ namespace VideoManager
                 {
                     await Dispatcher.InvokeAsync(() =>
                     {
-                        if (item is PhotoItem p) p.Thumbnail = bitmap;
-                        else if (item is VideoItem v) v.Thumbnail = bitmap;
+                        if (!token.IsCancellationRequested)
+                        {
+                            if (item is PhotoItem p) p.Thumbnail = bitmap;
+                            else if (item is VideoItem v) v.Thumbnail = bitmap;
+                        }
                     }, DispatcherPriority.Background);
                 }
             }
@@ -724,6 +968,8 @@ namespace VideoManager
             ProgBar.Value = 0;
             ProgBar.Maximum = aTrier.Count;
 
+            _currentOverwriteMode = OverwriteMode.Ask;
+
             int success = 0;
             foreach (var video in aTrier)
             {
@@ -732,12 +978,27 @@ namespace VideoManager
                 
                 if (File.Exists(destFile))
                 {
-                    TxtOverwriteMessage.Text = $"Le fichier {video.FileName} existe déjà. Écraser ?";
-                    OverlayOverwrite.Visibility = Visibility.Visible;
-                    _tcsOverwrite = new TaskCompletionSource<bool>();
-                    bool overwrite = await _tcsOverwrite.Task;
-                    OverlayOverwrite.Visibility = Visibility.Collapsed;
-                    if (!overwrite) { video.Status = "Ignoré"; continue; }
+                    if (_currentOverwriteMode == OverwriteMode.IgnoreAll)
+                    {
+                        video.Status = "Ignoré";
+                        ProgBar.Value++;
+                        continue;
+                    }
+                    else if (_currentOverwriteMode == OverwriteMode.Ask)
+                    {
+                        TxtOverwriteMessage.Text = $"Le fichier {video.FileName} existe déjà. Écraser ?";
+                        OverlayOverwrite.Visibility = Visibility.Visible;
+                        _tcsOverwrite = new TaskCompletionSource<bool>();
+                        bool overwrite = await _tcsOverwrite.Task;
+                        OverlayOverwrite.Visibility = Visibility.Collapsed;
+                        if (!overwrite)
+                        {
+                            video.Status = "Ignoré";
+                            ProgBar.Value++;
+                            continue;
+                        }
+                    }
+                    // Si OverwriteAll, on continue directement
                 }
 
                 try
@@ -778,6 +1039,8 @@ namespace VideoManager
             ProgBarPhotos.Value = 0;
             ProgBarPhotos.Maximum = aTrier.Count;
 
+            _currentOverwriteMode = OverwriteMode.Ask;
+
             foreach (var photo in aTrier)
             {
                 photo.Status = "En cours";
@@ -788,12 +1051,27 @@ namespace VideoManager
 
                 if (File.Exists(destFile))
                 {
-                    TxtOverwriteMessage.Text = $"Le fichier {photo.FileName} existe déjà. Écraser ?";
-                    OverlayOverwrite.Visibility = Visibility.Visible;
-                    _tcsOverwrite = new TaskCompletionSource<bool>();
-                    bool overwrite = await _tcsOverwrite.Task;
-                    OverlayOverwrite.Visibility = Visibility.Collapsed;
-                    if (!overwrite) { photo.Status = "Ignoré"; continue; }
+                    if (_currentOverwriteMode == OverwriteMode.IgnoreAll)
+                    {
+                        photo.Status = "Ignoré";
+                        ProgBarPhotos.Value++;
+                        continue;
+                    }
+                    else if (_currentOverwriteMode == OverwriteMode.Ask)
+                    {
+                        TxtOverwriteMessage.Text = $"Le fichier {photo.FileName} existe déjà. Écraser ?";
+                        OverlayOverwrite.Visibility = Visibility.Visible;
+                        _tcsOverwrite = new TaskCompletionSource<bool>();
+                        bool overwrite = await _tcsOverwrite.Task;
+                        OverlayOverwrite.Visibility = Visibility.Collapsed;
+                        if (!overwrite)
+                        {
+                            photo.Status = "Ignoré";
+                            ProgBarPhotos.Value++;
+                            continue;
+                        }
+                    }
+                    // Si OverwriteAll, on continue directement
                 }
 
                 try
@@ -816,7 +1094,20 @@ namespace VideoManager
         private async void BtnConvertir_Click(object sender, RoutedEventArgs e)
         {
             var aConvertir = ListVideos.SelectedItems.OfType<VideoItem>().Where(v => v.Format.Contains("4:2:2")).ToList();
-            if (!aConvertir.Any()) { MessageBox.Show("Sélectionnez des vidéos 4:2:2 (10-bits) à convertir."); return; }
+            if (!aConvertir.Any()) 
+            { 
+                await AfficherAlerteAsync("Sélection vide", "Sélectionnez des vidéos 4:2:2 (10-bits) à convertir.", true); 
+                return; 
+            }
+
+            string hbPath = Path.Combine(baseDir, "HandBrakeCLI.exe");
+            string presetPath = Path.Combine(baseDir, "Conversion420.json");
+
+            if (!File.Exists(hbPath) || !File.Exists(presetPath))
+            {
+                await AfficherAlerteAsync("Outils manquants", "HandBrakeCLI.exe ou Conversion420.json est introuvable au dossier racine.", true);
+                return;
+            }
 
             BtnConvertir.IsEnabled = false;
             ProgBar.Visibility = Visibility.Visible;
@@ -824,8 +1115,7 @@ namespace VideoManager
             ProgBar.Value = 0;
             ProgBar.Maximum = aConvertir.Count;
 
-            string hbPath = Path.Combine(baseDir, "HandBrakeCLI.exe");
-            string presetPath = Path.Combine(baseDir, "Conversion420.json");
+            var conversionCts = _refreshVideosCts?.Token ?? CancellationToken.None;
 
             foreach (var video in aConvertir)
             {
@@ -836,26 +1126,53 @@ namespace VideoManager
 
                 try
                 {
-                    var startInfo = new ProcessStartInfo
-                    {
-                        FileName = hbPath,
-                        Arguments = $"-i \"{video.FilePath}\" -o \"{output}\" --preset-import-file \"{presetPath}\"",
-                        CreateNoWindow = true,
-                        UseShellExecute = false
-                    };
-                    using var process = Process.Start(startInfo);
-                    if (process != null) await process.WaitForExitAsync();
+                    var res = await RunProcessAsync(
+                        hbPath,
+                        $"-i \"{video.FilePath}\" -o \"{output}\" --preset-import-file \"{presetPath}\"",
+                        conversionCts
+                    );
 
-                    if (ChkKeepSource422.IsChecked != true)
+                    if (res.ExitCode == 0 && File.Exists(output) && new FileInfo(output).Length > 0)
                     {
-                        FileSystem.DeleteFile(video.FilePath, UIOption.OnlyErrorDialogs, RecycleOption.SendToRecycleBin);
-                        string xml = Path.ChangeExtension(video.FilePath, ".XML");
-                        if (File.Exists(xml)) FileSystem.DeleteFile(xml, UIOption.OnlyErrorDialogs, RecycleOption.SendToRecycleBin);
+                        // Copier le XML compagnon
+                        string xmlSource = Path.ChangeExtension(video.FilePath, ".XML");
+                        if (File.Exists(xmlSource))
+                        {
+                            string xmlDest = Path.ChangeExtension(output, ".XML");
+                            File.Copy(xmlSource, xmlDest, true);
+                        }
+
+                        if (ChkKeepSource422.IsChecked != true)
+                        {
+                            FileSystem.DeleteFile(video.FilePath, UIOption.OnlyErrorDialogs, RecycleOption.SendToRecycleBin);
+                            if (File.Exists(xmlSource))
+                            {
+                                FileSystem.DeleteFile(xmlSource, UIOption.OnlyErrorDialogs, RecycleOption.SendToRecycleBin);
+                            }
+                        }
+
+                        video.Status = "Terminé";
+                        video.Location = "Destination / 4:2:0";
+                        video.FilePath = output;
                     }
-                    video.Status = "Terminé";
-                    video.Location = "Destination / 4:2:0";
+                    else
+                    {
+                        if (File.Exists(output))
+                        {
+                            try { File.Delete(output); } catch { }
+                        }
+                        video.Status = "Échec conversion";
+                    }
                 }
-                catch (Exception ex) { video.Status = "Échec conversion"; Debug.WriteLine(ex.Message); }
+                catch (Exception ex) 
+                { 
+                    video.Status = "Échec conversion"; 
+                    Debug.WriteLine(ex.Message);
+                    if (File.Exists(output))
+                    {
+                        try { File.Delete(output); } catch { }
+                    }
+                }
                 ProgBar.Value++;
             }
             ProgBar.Visibility = Visibility.Collapsed;
@@ -874,21 +1191,24 @@ namespace VideoManager
             ProgBar.Visibility = Visibility.Visible;
             ProgBar.IsIndeterminate = true;
 
+            var ejectCts = _refreshVideosCts?.Token ?? CancellationToken.None;
+
             try
             {
-                var psi = new ProcessStartInfo
-                {
-                    FileName = "powershell",
-                    Arguments = $"-Command \"$driveEject = New-Object -ComObject Shell.Application; $driveEject.Namespace(17).ParseName('{driveRoot.TrimEnd('\\')}').InvokeVerb('Eject')\"",
-                    CreateNoWindow = true,
-                    UseShellExecute = false
-                };
-                using var process = Process.Start(psi);
-                if (process != null) await process.WaitForExitAsync();
+                var res = await RunProcessAsync(
+                    "powershell",
+                    $"-Command \"$driveEject = New-Object -ComObject Shell.Application; $driveEject.Namespace(17).ParseName('{driveRoot.TrimEnd('\\')}').InvokeVerb('Eject')\"",
+                    ejectCts,
+                    15000
+                );
+                
                 OverlayEjectSuccess.Visibility = Visibility.Visible;
                 ActualiserTout();
             }
-            catch (Exception ex) { MessageBox.Show("Erreur éjection : " + ex.Message); }
+            catch (Exception ex) 
+            { 
+                await AfficherAlerteAsync("Erreur", "Erreur éjection : " + ex.Message, true); 
+            }
             finally
             {
                 ProgBar.IsIndeterminate = false;
@@ -997,8 +1317,18 @@ namespace VideoManager
 
         private void BtnModalOui_Click(object sender, RoutedEventArgs e) { OverlayModal.Visibility = Visibility.Collapsed; ActualiserTout(); }
         private void BtnModalNon_Click(object sender, RoutedEventArgs e) => OverlayModal.Visibility = Visibility.Collapsed;
-        private void BtnOverwriteOui_Click(object sender, RoutedEventArgs e) => _tcsOverwrite?.SetResult(true);
-        private void BtnOverwriteNon_Click(object sender, RoutedEventArgs e) => _tcsOverwrite?.SetResult(false);
+        private void BtnOverwriteOui_Click(object sender, RoutedEventArgs e) => _tcsOverwrite?.TrySetResult(true);
+        private void BtnOverwriteNon_Click(object sender, RoutedEventArgs e) => _tcsOverwrite?.TrySetResult(false);
+        private void BtnOverwriteIgnorerTout_Click(object sender, RoutedEventArgs e)
+        {
+            _currentOverwriteMode = OverwriteMode.IgnoreAll;
+            _tcsOverwrite?.TrySetResult(false);
+        }
+        private void BtnOverwriteEcraserTout_Click(object sender, RoutedEventArgs e)
+        {
+            _currentOverwriteMode = OverwriteMode.OverwriteAll;
+            _tcsOverwrite?.TrySetResult(true);
+        }
         private void BtnCloseEject_Click(object sender, RoutedEventArgs e) => OverlayEjectSuccess.Visibility = Visibility.Collapsed;
 
         private async void MenuSupprimer_Click(object sender, RoutedEventArgs e)
@@ -1026,7 +1356,10 @@ namespace VideoManager
                         }
                         ActualiserTout();
                     }
-                    catch (Exception ex) { MessageBox.Show(ex.Message); }
+                    catch (Exception ex) 
+                    { 
+                        await AfficherAlerteAsync("Erreur", ex.Message, true); 
+                    }
                 }
                 OverlayDelete.Visibility = Visibility.Collapsed;
             }
@@ -1055,7 +1388,10 @@ namespace VideoManager
                         }
                         ActualiserPhotos();
                     }
-                    catch (Exception ex) { MessageBox.Show(ex.Message); }
+                    catch (Exception ex) 
+                    { 
+                        await AfficherAlerteAsync("Erreur", ex.Message, true); 
+                    }
                 }
                 OverlayDelete.Visibility = Visibility.Collapsed;
             }
@@ -1089,6 +1425,7 @@ namespace VideoManager
             FullSizeImage.Source = null;
             FullSizeImage.Visibility = Visibility.Visible;
             VlcVideoView.Visibility = Visibility.Collapsed;
+            PlayerControlsPopup.IsOpen = false;
             LoadingShimmer.Visibility = Visibility.Visible;
             OverlayMedia.Visibility = Visibility.Visible;
 
@@ -1113,12 +1450,14 @@ namespace VideoManager
         private void BtnCloseMedia_Click(object sender, RoutedEventArgs e) 
         { 
             if (_mediaPlayer.IsPlaying) _mediaPlayer.Stop();
+            PlayerControlsPopup.IsOpen = false;
             OverlayMedia.Visibility = Visibility.Collapsed; 
         }
 
         private void OverlayMedia_MouseLeftButtonDown(object sender, MouseButtonEventArgs e) 
         { 
             if (_mediaPlayer.IsPlaying) _mediaPlayer.Stop();
+            PlayerControlsPopup.IsOpen = false;
             OverlayMedia.Visibility = Visibility.Collapsed; 
         }
 
@@ -1127,6 +1466,7 @@ namespace VideoManager
             if (e.Key == Key.Escape && OverlayMedia.Visibility == Visibility.Visible)
             {
                 if (_mediaPlayer.IsPlaying) _mediaPlayer.Stop();
+                PlayerControlsPopup.IsOpen = false;
                 OverlayMedia.Visibility = Visibility.Collapsed;
                 e.Handled = true;
             }
@@ -1147,11 +1487,58 @@ namespace VideoManager
             if (!File.Exists(filePath)) return;
             FullSizeImage.Visibility = Visibility.Collapsed;
             VlcVideoView.Visibility = Visibility.Collapsed;
+            PlayerControlsPopup.IsOpen = false;
             LoadingShimmer.Visibility = Visibility.Visible;
             OverlayMedia.Visibility = Visibility.Visible;
 
             var media = new Media(_libVLC, new Uri(filePath));
             _mediaPlayer.Play(media);
+        }
+
+        private void VideoTimer_Tick(object? sender, EventArgs e)
+        {
+            if (_mediaPlayer.IsPlaying && !_isDraggingSlider)
+            {
+                SliderProgress.Value = _mediaPlayer.Time;
+                var current = TimeSpan.FromMilliseconds(_mediaPlayer.Time);
+                var total = TimeSpan.FromMilliseconds(_mediaPlayer.Length);
+                string format = total.TotalHours >= 1 ? @"h\:mm\:ss" : @"mm\:ss";
+                TxtTime.Text = $"{current.ToString(format)} / {total.ToString(format)}";
+            }
+        }
+
+        private void BtnPlayPause_Click(object sender, RoutedEventArgs e)
+        {
+            if (_mediaPlayer.IsPlaying) _mediaPlayer.Pause();
+            else _mediaPlayer.Play();
+        }
+
+        private void SliderProgress_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            _isDraggingSlider = true;
+        }
+
+        private void SliderProgress_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        {
+            _isDraggingSlider = false;
+            _mediaPlayer.Time = (long)SliderProgress.Value;
+        }
+
+        private void SliderProgress_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (_isDraggingSlider)
+            {
+                var current = TimeSpan.FromMilliseconds(e.NewValue);
+                var total = TimeSpan.FromMilliseconds(_mediaPlayer.Length);
+                string format = total.TotalHours >= 1 ? @"h\:mm\:ss" : @"mm\:ss";
+                TxtTime.Text = $"{current.ToString(format)} / {total.ToString(format)}";
+            }
+        }
+
+        private void SliderVolume_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (_mediaPlayer != null)
+                _mediaPlayer.Volume = (int)e.NewValue;
         }
     }
 
