@@ -19,5 +19,9 @@ ffmpeg.exe
 ffprobe.exe
 HandBrakeCLI.exe
 
-# ExifTool libs (dossier volumineux, l'exe seul suffit pour le repo)
+# ExifTool (à télécharger à part : exiftool.exe ne fonctionne pas sans son dossier exiftool_files/)
+exiftool.exe
 exiftool_files/
+
+# Fichiers temporaires de compilation WPF
+*_wpftmp.csproj

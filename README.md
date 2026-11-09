@@ -1,34 +1,63 @@
-# VideoManager - Sony A6700 Post-Production Tool
+# VideoManager — post-production tool for Sony A6700 footage
 
-**VideoManager** est une application de bureau Windows (WPF) conçue pour automatiser et simplifier le workflow de post-production des créateurs utilisant un Sony A6700. Elle permet de gérer le tri, la conversion et la visualisation des rushs vidéos et des photos en un seul endroit.
+**VideoManager** is a Windows desktop app (C# / .NET 10 / WPF) that automates my video workflow with a
+Sony A6700: offloading the SD card, converting heavy 4:2:2 10-bit footage into files that edit smoothly,
+and browsing the videos and photos in one place.
 
-## 🚀 Objectifs du Projet
+> **Built with an AI coding agent.** I designed the tool, specified each feature, steered the agent and
+> tested the app on my own footage; the C# code was written by **Google Antigravity (Gemini)**.
+> [`GEMINI.md`](GEMINI.md) is the project memory I maintain for the agent: architecture choices,
+> UI rules and coding guidelines it must follow.
 
-- **Automatisation du Tri** : Détection automatique de la carte SD et transfert intelligent vers le PC (structuré par type de fichier).
-- **Optimisation du Flux Vidéo** : Conversion des fichiers 4:2:2 10-bits (généralement lourds à lire) vers un format 4:2:0 8-bits fluide via HandBrake.
-- **Visualisation Native** : Lecture des rushs Sony haute qualité directement dans l'application grâce à l'intégration de VLC.
-- **Gestion de Photothèque** : Tri et visualisation des fichiers RAW (.ARW) et JPEG.
-- **Statistiques & Dashboard** : Vue d'ensemble de la bibliothèque et extraction du Shutter Count (nombre de déclenchements) via ExifTool.
+![Videos tab: clips with thumbnail, duration, format, location and conversion status](docs/screenshots/videos.png)
 
-## 🛠️ Fonctionnement Technique
+![Dashboard: photo and video counts on the SD card and the PC, masonry gallery of thumbnails](docs/screenshots/dashboard.jpg)
 
-L'application repose sur plusieurs outils puissants intégrés :
-- **FFmpeg / FFprobe** : Analyse technique des fichiers et extraction des miniatures.
-- **HandBrakeCLI** : Moteur de conversion vidéo performant avec presets personnalisés.
-- **LibVLCSharp** : Moteur de rendu vidéo pour une lecture fluide de tous les formats.
-- **ExifTool** : Extraction des métadonnées avancées des fichiers Sony.
+## Why
 
-## 🎨 Design & UX
-- Interface **Custom Dark** avec effets de **Glassmorphism**.
-- Mise en page dynamique de type **Masonry** (Pinterest style) pour le Dashboard.
-- Utilisation de `WindowChrome` pour une immersion totale.
+The A6700 records 4:2:2 10-bit video, which is heavy to play back while editing.
+Copying the card, sorting the files, converting the clips and checking the photos were separate manual steps;
+VideoManager puts them in one window.
 
-## ⚙️ Installation & Prérequis
-L'application nécessite les binaires suivants à la racine (exclus du repo GitHub pour des raisons de taille) :
-- `ffmpeg.exe`
-- `ffprobe.exe`
-- `HandBrakeCLI.exe`
-- `exiftool.exe`
+## Features
 
-## 📝 Licence
-Projet privé - Tous droits réservés.
+- **SD card detection and offload**: finds the Sony clip folder (`PRIVATE\M4ROOT\CLIP`) automatically and
+  copies files to the PC, sorted by type, together with their Sony `.XML` metadata sidecars.
+- **4:2:2 10-bit → 4:2:0 8-bit conversion** with HandBrakeCLI and a custom preset
+  ([`Conversion420.json`](Conversion420.json)); FFprobe reads each clip's pixel format and duration.
+- **Built-in player** based on LibVLCSharp, for native Sony files, with a fullscreen view
+  (play/pause, seek bar, volume).
+- **Photo library** for RAW (`.ARW`) and JPEG files; video and photo lists show each file's format.
+- **Overwrite prompts** when a file already exists at the destination: overwrite, skip, or apply to all.
+- **Dashboard** with high-resolution thumbnails in a masonry layout, and the camera's **shutter count** read with ExifTool.
+- **Safe operations**: asynchronous SD card ejection with a progress bar, deleted files go to the Recycle Bin.
+- **Custom dark UI**: `WindowChrome` title bar, dark immersive window frame through `dwmapi.dll`,
+  in-app overlays instead of system dialogs; all disk and process work runs off the UI thread.
+
+## Tech stack
+
+C#, .NET 10, WPF · LibVLCSharp · MetadataExtractor · external tools: FFmpeg / FFprobe, HandBrakeCLI, ExifTool.
+
+## Build and run
+
+Requires Windows and the .NET 10 SDK.
+
+1. Download the external tools and put them next to `VideoManager.csproj` (they are not in the repository):
+   - `ffmpeg.exe` and `ffprobe.exe` — <https://ffmpeg.org/download.html>
+   - `HandBrakeCLI.exe` — <https://handbrake.fr/downloads2.php>
+   - `exiftool.exe` **and its `exiftool_files/` folder** (Windows package) — <https://exiftool.org/>
+2. Build and run:
+
+```bash
+dotnet run
+```
+
+The build copies the tools to the output folder.
+
+## Status
+
+Personal tool, used on my own footage. Next steps are tracked in [`TODO.md`](TODO.md) (in French).
+
+## License
+
+No license: all rights reserved. The code is public for reference.
